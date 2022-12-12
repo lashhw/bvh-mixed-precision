@@ -1,5 +1,6 @@
 #include <iostream>
 #include <filesystem>
+#include <unordered_map>
 #include <mpfr.h>
 #include <bvh/triangle.hpp>
 #include <bvh/bvh.hpp>
@@ -12,8 +13,9 @@
 const mpfr_prec_t mantissa_width = 7;
 const mpfr_exp_t exponent_width = 8;
 
-template <typename Traverser, typename PrimitiveIntersector>
-void traverse(Traverser &traverser, PrimitiveIntersector &primitive_intersector) {
+template <typename Bvh, typename Traverser, typename PrimitiveIntersector>
+void traverse(Bvh &bvh, Traverser &traverser, PrimitiveIntersector &primitive_intersector,
+              bool output_graph, std::unordered_map<size_t, size_t> &parent) {
     uintmax_t traversal_steps_sum = 0;
     uintmax_t intersections_sum = 0;
     uintmax_t high_precision_sum = 0;
@@ -23,7 +25,7 @@ void traverse(Traverser &traverser, PrimitiveIntersector &primitive_intersector)
     srand(0);
     std::ifstream ray_queries_file("ray_queries.bin", std::ios::in | std::ios::binary);
     float r[7];
-    for (int j = 0; ray_queries_file.read(reinterpret_cast<char*>(&r), 7 * sizeof(float)); j++) {
+    for (int i = 0; ray_queries_file.read(reinterpret_cast<char*>(&r), 7 * sizeof(float)); i++) {
         if (rand() % 1000 != 0) continue;
 
         bvh::Ray<float> ray(
@@ -36,32 +38,28 @@ void traverse(Traverser &traverser, PrimitiveIntersector &primitive_intersector)
         typename Traverser::Statistics statistics;
         traverser.traverse(ray, primitive_intersector, statistics);
 
+        if (output_graph) {
+            std::filesystem::create_directory("graphs");
+            std::string filepath = "graphs/bvh_" + std::to_string(i) + ".dot";
+            std::ofstream dot_file(filepath);
+            dot_file << "digraph bvh {";
+            dot_file << "\n    node [shape=point]";
+            dot_file << "\n    edge [arrowhead=none]";
+
+            for (auto &n : statistics.traversed) {
+                dot_file << "\n    " << parent[n] << " -> " << n;
+                if (bvh.nodes[n].high_precision)  dot_file << " [color=red]";
+            }
+
+            dot_file << "\n}";
+            dot_file.close();
+        }
+
         traversal_steps_sum += statistics.traversal_steps;
         intersections_sum += statistics.intersections;
         high_precision_sum += statistics.high_precision_count;
         low_precision_sum += statistics.low_precision_count;
         count += 1;
-
-        // --- temp
-        /*
-        std::filesystem::create_directory("graphs");
-        std::string filepath = "graphs/bvh_" + std::to_string(j) + ".dot";
-        std::ofstream dot_file(filepath);
-        dot_file << "digraph bvh {";
-        dot_file << "\n    node [shape=point]";
-        dot_file << "\n    edge [arrowhead=none]";
-
-        for (auto &edge : edges) {
-            if (statistics.traversed.count(edge.second)) {
-                dot_file << "\n    " << edge.first << " -> " << edge.second;
-                if (bvh.nodes[edge.second].high_precision)  dot_file << " [color=red]";
-            }
-        }
-
-        dot_file << "\n}";
-        dot_file.close();
-         */
-        // temp ---
     }
 
     std::cout << double(traversal_steps_sum) / double(count) << " "
@@ -92,17 +90,32 @@ int main() {
     bvh::SweepSahBuilder<bvh::Bvh<float>> builder(bvh);
     builder.build(global_bbox, bboxes.get(), centers.get(), triangles.size());
 
+    std::unordered_map<size_t, size_t> parent;
+    std::queue<size_t> queue;
+    queue.push(0);
+    while (!queue.empty()) {
+        size_t curr = queue.front();
+        queue.pop();
+        if (!bvh.nodes[curr].is_leaf()) {
+            size_t left_idx = bvh.nodes[curr].first_child_or_primitive;
+            size_t right_idx = left_idx + 1;
+            parent[left_idx] = curr;
+            parent[right_idx] = curr;
+            queue.push(left_idx);
+            queue.push(right_idx);
+        }
+    }
+
     std::cout << "All high: ";
     bvh::SingleRayTraverser<bvh::Bvh<float>> traverser_high(bvh);
     bvh::ClosestPrimitiveIntersector<bvh::Bvh<float>, bvh::Triangle<float>> primitive_intersector(bvh, triangles.data());
-    traverse(traverser_high, primitive_intersector);
+    traverse(bvh, traverser_high, primitive_intersector, false, parent);
 
     std::cout << "All low: ";
     for (size_t i = 0; i < bvh.node_count; i++) bvh.nodes[i].high_precision = false;
-    using Bvh = bvh::Bvh<float>;
-    using NodeIntersector = bvh::MPNodeIntersector<Bvh, mantissa_width, exponent_width>;
-    bvh::SingleRayTraverser<Bvh, 64, NodeIntersector> traverser_mixed(bvh);
-    traverse(traverser_mixed, primitive_intersector);
+    using MPNodeIntersector = bvh::MPNodeIntersector<bvh::Bvh<float>, mantissa_width, exponent_width>;
+    bvh::SingleRayTraverser<bvh::Bvh<float>, 64, MPNodeIntersector> traverser_mixed(bvh);
+    traverse(bvh, traverser_mixed, primitive_intersector, false, parent);
 
     for (int i = -100; i <= 100; i++) {
         float t_trav_high = 0.5;
@@ -111,27 +124,7 @@ int main() {
         HighPrecisionMarker high_precision_marker(mantissa_width, exponent_width);
         high_precision_marker.mark(bvh, t_trav_high, t_trav_low);
 
-        // --- temp
-        /*
-        std::vector<std::pair<size_t, size_t>> edges;
-        std::queue<size_t> queue;
-        queue.push(0);
-        while (!queue.empty()) {
-            size_t curr = queue.front();
-            queue.pop();
-            if (!bvh.nodes[curr].is_leaf()) {
-                size_t left_idx = bvh.nodes[curr].first_child_or_primitive;
-                size_t right_idx = left_idx + 1;
-                edges.emplace_back(curr, left_idx);
-                edges.emplace_back(curr, right_idx);
-                queue.push(left_idx);
-                queue.push(right_idx);
-            }
-        }
-         */
-        // temp ---
-
         std::cout << t_trav_high << " " << t_trav_low << " ";
-        traverse(traverser_mixed, primitive_intersector);
+        traverse(bvh, traverser_mixed, primitive_intersector, false, parent);
     }
 }
