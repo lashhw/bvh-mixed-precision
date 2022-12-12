@@ -80,8 +80,9 @@ struct HighPrecisionMarker {
                 float p_right_low_curr_low = right_bbox_low.half_area() / curr_bbox_low.half_area();
                 float p_left_high_curr_high = left_bbox_high.half_area() / curr_bbox_high.half_area();
                 float p_right_high_curr_high = right_bbox_high.half_area() / curr_bbox_high.half_area();
-                left_bbox_low.shrink(curr_bbox_high);
-                right_bbox_low.shrink(curr_bbox_high);
+                // This case should be handled correctly, but it is quite difficult :(
+                // left_bbox_low.shrink(curr_bbox_high);
+                // right_bbox_low.shrink(curr_bbox_high);
                 float p_left_low_curr_high = left_bbox_low.half_area() / curr_bbox_high.half_area();
                 float p_right_low_curr_high = right_bbox_low.half_area() / curr_bbox_high.half_area();
 
