@@ -4,7 +4,7 @@
 #include <mpfr.h>
 #include <bvh/triangle.hpp>
 #include <bvh/bvh.hpp>
-#include <bvh/sweep_sah_builder.hpp>
+#include <bvh/mixed_sweep_sah_builder.hpp>
 #include <bvh/primitive_intersectors.hpp>
 #include <bvh/single_ray_traverser.hpp>
 #include "happly.h"
@@ -86,45 +86,21 @@ int main() {
               << global_bbox.min[0] << ", " << global_bbox.min[1] << ", " << global_bbox.min[2] << "), ("
               << global_bbox.max[0] << ", " << global_bbox.max[1] << ", " << global_bbox.max[2] << ")" << std::endl;
 
-    bvh::Bvh<float> bvh;
-    bvh::SweepSahBuilder<bvh::Bvh<float>> builder(bvh);
-    builder.build(global_bbox, bboxes.get(), centers.get(), triangles.size());
-
-    std::unordered_map<size_t, size_t> parent;
-    std::queue<size_t> queue;
-    queue.push(0);
-    while (!queue.empty()) {
-        size_t curr = queue.front();
-        queue.pop();
-        if (!bvh.nodes[curr].is_leaf()) {
-            size_t left_idx = bvh.nodes[curr].first_child_or_primitive;
-            size_t right_idx = left_idx + 1;
-            parent[left_idx] = curr;
-            parent[right_idx] = curr;
-            queue.push(left_idx);
-            queue.push(right_idx);
-        }
-    }
-
-    std::cout << "All high: ";
-    bvh::SingleRayTraverser<bvh::Bvh<float>> traverser_high(bvh);
-    bvh::ClosestPrimitiveIntersector<bvh::Bvh<float>, bvh::Triangle<float>> primitive_intersector(bvh, triangles.data());
-    traverse(bvh, traverser_high, primitive_intersector, false, parent);
-
-    std::cout << "All low: ";
-    for (size_t i = 0; i < bvh.node_count; i++) bvh.nodes[i].high_precision = false;
-    using MPNodeIntersector = bvh::MPNodeIntersector<bvh::Bvh<float>, mantissa_width, exponent_width>;
-    bvh::SingleRayTraverser<bvh::Bvh<float>, 64, MPNodeIntersector> traverser_mixed(bvh);
-    traverse(bvh, traverser_mixed, primitive_intersector, false, parent);
-
-    for (int i = -200; i <= 55; i++) {
+    for (int i = 105; i >= 0; i--) {
         float t_trav_high = 0.5;
-        float t_trav_low = float(i) / 100;
+        float t_trav_low = 0.5;
+        float k = float(i) / 100;
 
-        HighPrecisionMarker high_precision_marker(mantissa_width, exponent_width);
-        high_precision_marker.mark(bvh, t_trav_high, t_trav_low);
+        bvh::Bvh<float> bvh;
+        bvh::MixedSweepSahBuilder<bvh::Bvh<float>, mantissa_width, exponent_width> builder(bvh, t_trav_high, t_trav_low, k);
+        builder.build(global_bbox, bboxes.get(), centers.get(), triangles.size());
 
-        std::cout << t_trav_high << " " << t_trav_low << " ";
+        using MPNodeIntersector = bvh::MPNodeIntersector<bvh::Bvh<float>, mantissa_width, exponent_width>;
+        bvh::SingleRayTraverser<bvh::Bvh<float>, 64, MPNodeIntersector> traverser_mixed(bvh);
+        bvh::ClosestPrimitiveIntersector<bvh::Bvh<float>, bvh::Triangle<float>> primitive_intersector(bvh, triangles.data());
+        std::unordered_map<size_t, size_t> parent;
+
+        std::cout << t_trav_high << " " << t_trav_low << " " << k << " ";
         traverse(bvh, traverser_mixed, primitive_intersector, false, parent);
     }
 }
