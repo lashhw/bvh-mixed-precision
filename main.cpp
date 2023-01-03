@@ -117,7 +117,7 @@ int main() {
     bvh::SingleRayTraverser<bvh::Bvh<float>, 64, MPNodeIntersector> traverser_mixed(bvh);
     traverse(bvh, traverser_mixed, primitive_intersector, false, parent);
 
-    for (int i = -100; i <= 100; i++) {
+    for (int i = -200; i <= 55; i++) {
         float t_trav_high = 0.5;
         float t_trav_low = float(i) / 100;
 
